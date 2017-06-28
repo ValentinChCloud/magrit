@@ -1,6 +1,20 @@
 FROM ubuntu:latest
 MAINTAINER mth
 
+# These environment variables are passed from Galaxy to the container
+# and help you enable connectivity to Galaxy from within the container.
+# This means your user can import/export data from/to Galaxy.
+ENV DEBIAN_FRONTEND=noninteractive \
+    API_KEY=none \
+    DEBUG=false \
+    PROXY_PREFIX=none \
+    GALAXY_URL=none \
+    GALAXY_WEB_PORT=10000 \
+    HISTORY_ID=none \
+    REMOTE_HOST=none
+
+
+
 RUN apt-get update && apt-get install -y software-properties-common && add-apt-repository ppa:fkrull/deadsnakes \
 		&& apt-get update \
 		&& apt-get install -y gcc libpython3.6-dev libopenblas-dev libopenblas-base \
@@ -42,7 +56,11 @@ ENV LD_LIBRARY_PATH="${GDALINST}/gdal-2.1.3/lib:${LD_LIBRARY_PATH}"
 
 ARG CACHEBUST=1
 
-RUN rm -rf $GDALBUILD && mkdir /home/app && cd /home/app && wget https://github.com/riatelab/magrit/archive/master.zip && unzip master.zip && mv magrit-master magrit
+
+
+RUN rm -rf $GDALBUILD && mkdir /home/app && cd /home/app && wget https://github.com/mthh/magrit/archive/for_galaxy.zip && unzip for_galaxy.zip && mv magrit-for_galaxy magrit
+
+
 
 RUN wget https://bootstrap.pypa.io/get-pip.py && python3.6 get-pip.py
 
@@ -50,7 +68,28 @@ RUN cd /home/app/magrit/ \
     && pip3.6 install -U -r requirements-dev.txt \
     && python3.6 setup.py build_ext --inplace
 
-EXPOSE 9999
 
-CMD service redis-server start \
-    && gunicorn "magrit_app.app:create_app()" --bind 0.0.0.0:9999 --worker-class aiohttp.worker.GunicornUVLoopWebWorker --workers 1 --chdir /home/app/magrit/
+
+
+#Galaxy stuff
+RUN apt-get -qq update && \
+    apt-get install --no-install-recommends -y \
+    wget procps nginx python python-pip net-tools nginx
+
+# Our very important scripts. Make sure you've run `chmod +x startup.sh
+# monitor_traffic.sh` outside of the container!
+ADD ./startup.sh /startup.sh
+ADD ./monitor_traffic.sh /monitor_traffic.sh
+
+# Nginx configuration
+RUN mkdir /import
+COPY ./proxy.conf /proxy.conf
+
+VOLUME ["/import"]
+WORKDIR /import/
+
+
+#Changed 9999->80, because reverse proxy will do the job
+EXPOSE 80
+CMD /startup.sh
+
